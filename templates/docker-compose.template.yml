@@ -1,0 +1,26 @@
+version: '3.4'
+
+services:
+  ${SERVICE_NAME}:
+    build: .
+    container_name: '${SERVICE_NAME}'
+    networks:
+      - qnzl
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${ROUTER_NAME}.rule=Host(`${HOST}`)"
+      - "traefik.http.routers.${ROUTER_NAME}.entrypoints=http,https"
+      - "traefik.http.routers.${ROUTER_NAME}.tls=true"
+      - "traefik.http.routers.${ROUTER_NAME}.tls.certresolver=${CERT_RESOLVER}"
+      - "traefik.http.services.${SERVICE_NAME}.loadbalancer.server.port=${SERVER_PORT}"
+      - "traefik.http.routers.${SERVICE_NAME}.middlewares=httpsRedirect"
+      - "traefik.http.middlewares.${SERVICE_NAME}-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.${SERVICE_NAME}-redirect.redirectscheme.permanent=true"
+
+    deploy:
+      replicas: ${REPLICAS}
+
+networks:
+  qnzl:
+    external: true
+
