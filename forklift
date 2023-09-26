@@ -1,81 +1,139 @@
 #!/bin/bash
 
-# Default configuration
-DEFAULT_PORT=8000
+CONFIG_DIR="$HOME/.config/forklift"
+TEMPLATE_DIR="$CONFIG_DIR"
 
-# Function to parse env file
-parse_env_file() {
+function parse_env_file {
   while IFS= read -r line || [[ -n "$line" ]]; do
     key="${line%=*}"
     value="${line#*=}"
-    if [[ $value == \$\(*\) ]]; then
-      # It's a bash command, execute it
+    if [[ $value == \$\(*\)* ]]; then
       command="${value:2:-1}"
-      echo "${key}=$(eval $command)"
+      echo "$key=$(eval $command)"
     else
-      # It's a plain text value
-      echo "${key}=${value}"
+      echo "$line"
     fi
   done < "$1"
 }
 
-# Main function to process arguments and generate files
-generate_files() {
-  local serviceName="$1"
-  local url="$2"
-  local port="${3:-$DEFAULT_PORT}"
-  local envFile="$4"
-
-  # Path to templates
-  DOCKERFILE_TEMPLATE="templates/Dockerfile.template"
-  DOCKERCOMPOSE_TEMPLATE="templates/docker-compose.template.yml"
-
-  # Read templates
-  dockerfile=$(<"$DOCKERFILE_TEMPLATE")
-  dockerCompose=$(<"$DOCKERCOMPOSE_TEMPLATE")
-
-  # Replace placeholders
-  dockerfile=${dockerfile/\$\{EXPOSE_PORT\}/$port}
-  dockerfile=${dockerfile//\$\{SERVICE_NAME\}/$serviceName}
-  dockerCompose=${dockerCompose//\$\{SERVICE_NAME\}/$serviceName}
-  dockerCompose=${dockerCompose//\$\{URL\}/$url}
-  dockerCompose=${dockerCompose//\$\{PORT\}/$port}
-
-  # Handle env file
-  if [[ $envFile ]]; then
-    envVars=$(parse_env_file "$envFile")
-    dockerfile="$dockerfile
-
-# Environment Variables
-ENV $envVars"
+function load_config {
+  local configPath="$CONFIG_DIR/forklift.json"
+  if [[ -f "$configPath" ]]; then
+    networkName=$(jq -r '.NETWORK_NAME // empty' "$configPath")
+    certResolver=$(jq -r '.CERT_RESOLVER // empty' "$configPath")
   fi
-
-  # Output the files
-  echo "$dockerfile" > "./Dockerfile.$serviceName"
-  echo "$dockerCompose" > "./docker-compose.$serviceName.yml"
 }
 
-# Command Line Argument Parsing
-while getopts "p:e:" opt; do
-  case $opt in
-    p)
-      port="$OPTARG"
-      ;;
-    e)
-      envFile="$OPTARG"
-      ;;
-    \?)
-      echo "Invalid option: -$OPTARG" >&2
-      exit 1
-      ;;
+function generate_files {
+  local serviceName="$1"
+  local url="$2"
+  local port="$3"
+  local routerName="${4:-$serviceName}"
+  local replicas="$5"
+  local logLevel="$6"
+  local envFile="$7"
+  local certResolver="$8"
+  local networkName="$9"
+
+  local dockerfileTemplate
+  dockerfileTemplate=$(<"$TEMPLATE_DIR/Dockerfile.template")
+  local dockerComposeTemplate
+  dockerComposeTemplate=$(<"$TEMPLATE_DIR/docker-compose.template.yml")
+
+  local dockerfile
+  dockerfile=${dockerfileTemplate//\$\{EXPOSE_PORT\}/$port}
+  dockerfile=${dockerfile//\$\{SERVICE_NAME\}/$serviceName}
+
+  if [[ $envFile ]]; then
+    dockerfile="$dockerfile\n\n# Environment Variables\nENV $(parse_env_file "$envFile")\n"
+  fi
+
+  local dockerCompose
+  dockerCompose=${dockerComposeTemplate//\$\{SERVICE_NAME\}/$serviceName}
+  dockerCompose=${dockerCompose//\$\{HOST\}/$url}
+  dockerCompose=${dockerCompose//\$\{SERVER_PORT\}/$port}
+  dockerCompose=${dockerCompose//\$\{ROUTER_NAME\}/$routerName}
+  dockerCompose=${dockerCompose//\$\{REPLICAS\}/$replicas}
+  dockerCompose=${dockerCompose//\$\{LOG_LEVEL\}/$logLevel}
+  dockerCompose=${dockerCompose//\$\{CERT_RESOLVER\}/$certResolver}
+  dockerCompose=${dockerCompose//\$\{NETWORK_NAME\}/$networkName}
+
+  echo -e "$dockerfile" > "./Dockerfile.$serviceName"
+  echo -e "$dockerCompose" > "./docker-compose.$serviceName.yml"
+}
+
+function show_help {
+  echo "Usage: $(basename "$0") <serviceName> <url> [options]"
+  echo ""
+  echo "Generate Docker configuration files"
+  echo ""
+  echo "Options:"
+  echo "  --port            the port the service will run on [default: 8000]"
+  echo "  --router-name     the router name"
+  echo "  --replicas        set the number of replicas for the service"
+  echo "  --log-level       set the log level for Traefik"
+  echo "  --env-file        path to the env file"
+  echo "  --cert-resolver   certificate resolver"
+  echo "  --network-name    network name"
+  echo "  -h, --help        show help"
+}
+
+load_config  # Load defaults from configuration file
+
+while [[ $# -gt 0 ]]; do
+  key="$1"
+  case $key in
+    --port)
+    port="$2"
+    shift
+    shift
+    ;;
+    --router-name)
+    routerName="$2"
+    shift
+    shift
+    ;;
+    --replicas)
+    replicas="$2"
+    shift
+    shift
+    ;;
+    --log-level)
+    logLevel="$2"
+    shift
+    shift
+    ;;
+    --env-file)
+    envFile="$2"
+    shift
+    shift
+    ;;
+    --cert-resolver)
+    certResolver="$2"
+    shift
+    shift
+    ;;
+    --network-name)
+    networkName="$2"
+    shift
+    shift
+    ;;
+    -h|--help)
+    show_help
+    exit 0
+    ;;
+    *)
+    if [[ -z "$serviceName" ]]; then
+      serviceName="$1"
+    elif [[ -z "$url" ]]; then
+      url="$1"
+    fi
+    shift
+    ;;
   esac
 done
 
-shift $((OPTIND-1))
-
-serviceName="$1"
-url="$2"
-
-# Call main function
-generate_files "$serviceName" "$url" "$port" "$envFile"
+port="${port:-8000}"
+replicas="${replicas:-1}"
+generate_files "$serviceName" "$url" "$port" "$routerName" "$replicas" "$logLevel" "$envFile" "$certResolver" "$networkName"
 

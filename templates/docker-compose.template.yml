@@ -5,7 +5,7 @@ services:
     build: .
     container_name: '${SERVICE_NAME}'
     networks:
-      - qnzl
+      - ${NETWORK_NAME}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${ROUTER_NAME}.rule=Host(`${HOST}`)"
@@ -21,6 +21,6 @@ services:
       replicas: ${REPLICAS}
 
 networks:
-  qnzl:
+  ${NETWORK_NAME}:
     external: true
 
