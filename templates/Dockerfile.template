@@ -1,0 +1,35 @@
+# Use the official Node.js image as a parent image
+FROM node:alpine
+
+# Set the working directory in the container
+WORKDIR /usr/src/app
+
+RUN apk --no-cache add curl
+
+RUN curl -o /usr/local/bin/squawk https://raw.githubusercontent.com/madelinecameron/squawk/main/squawk-heartbeat.sh && \
+    chmod +x /usr/local/bin/squawk
+
+# Install dependencies for squawk
+RUN squawk --install-deps
+
+RUN echo "Using version ${squawk --version} of Squawk"
+
+# Copy package.json and package-lock.json to the working directory
+COPY package*.json ./
+
+# Install the application dependencies
+RUN npm install
+
+# Copy the application code to the container
+COPY . .
+
+# The port the app listens on
+EXPOSE ${EXPOSE_PORT}
+
+# Use an existing script to check the health status from Squawk
+HEALTHCHECK --interval=5m --timeout=3s --start-period=30s \
+  CMD squawk_heartbeat ${SERVICE_NAME} 0 30
+
+# Command to run the application
+CMD ["node", "app.js"]
+
